@@ -1,22 +1,19 @@
 """
 Hermes tool registration for Samsung SmartThings.
 
-Symlink into Hermes:
+Install:
   ln -s "$PROJECT_ROOT/tools/smartthings_tool.py" "$HOME/.hermes/hermes-agent/tools/smartthings_tool.py"
-
-Then add to PYTHONPATH so auth.py and smartthings_core.py resolve:
   export HERMES_SMARTTHINGS_ROOT=/path/to/hermes-smartthings
 """
 import json, os, sys
 from pathlib import Path
 
 # ── Resolve imports ────────────────────────────────────────────────
-# When running from a symlink in hermes-agent/tools/, _PROJECT_ROOT points
-# to wherever the symlink target lives. We inject that onto PYTHONPATH so
-# sibling modules (auth.py, smartthings_core.py) import cleanly.
 _THIS = Path(__file__).resolve()
 _PROJECT_ROOT = _THIS.parent.parent
-sys.path.insert(0, os.getenv("HERMES_SMARTTHINGS_ROOT", str(_PROJECT_ROOT)))
+sys.path.insert(
+    0, os.getenv("HERMES_SMARTTHINGS_ROOT", str(_PROJECT_ROOT))
+)
 
 try:
     from smartthings_core import get_client, SmartThingsClient
@@ -25,15 +22,17 @@ except Exception:
     SmartThingsClient = None
     _OK = False
 
-# registry import must survive standalone import (e.g. `python smartthings_tool.py`)
-# When symlinked into hermes-agent/tools/, the package root is in sys.path.
 from tools.registry import registry  # type: ignore[import-unresolved]
+
+from _log import get_logger
+
+logger = get_logger(__name__)
 
 
 # ── Auth probe (determines toolset availability) ───────────────────
 
 def _has_auth() -> bool:
-    """Return True if any auth source is present (PAT env or saved OAuth)."""
+    """Return True if any auth source is present."""
     if os.getenv("SMARTTHINGS_TOKEN"):
         return True
     token_file = Path.home() / ".hermes" / "smartthings_auth.json"
@@ -50,20 +49,26 @@ def _has_auth() -> bool:
 
 def _client() -> SmartThingsClient | None:
     if not _OK:
+        logger.warning("SmartThings modules not importable (check HERMES_SMARTTHINGS_ROOT)")
         return None
     try:
-        return get_client()
-    except RuntimeError:
+        c = get_client()
+        logger.debug("Client resolved successfully")
+        return c
+    except RuntimeError as e:
+        logger.warning("Client creation failed: %s", e)
         return None
 
 
 def _err(msg: str) -> str:
+    logger.error("Returning error to Hermes: %s", msg)
     return json.dumps({"error": True, "message": msg}, indent=2)
 
 
 # ── Tool handlers ──────────────────────────────────────────────────
 
 def smartthings_list_locations(task_id: str | None = None) -> str:
+    logger.info("[tool] list_locations")
     c = _client()
     if not c:
         return _err("SmartThings client unavailable. No valid token found.")
@@ -71,6 +76,7 @@ def smartthings_list_locations(task_id: str | None = None) -> str:
 
 
 def smartthings_list_devices(location_id: str | None = None, task_id: str | None = None) -> str:
+    logger.info("[tool] list_devices (location_id=%s)", location_id)
     c = _client()
     if not c:
         return _err("SmartThings client unavailable.")
@@ -78,6 +84,7 @@ def smartthings_list_devices(location_id: str | None = None, task_id: str | None
 
 
 def smartthings_get_device(device_id: str, task_id: str | None = None) -> str:
+    logger.info("[tool] get_device (device_id=%s)", device_id)
     c = _client()
     if not c:
         return _err("SmartThings client unavailable.")
@@ -85,6 +92,7 @@ def smartthings_get_device(device_id: str, task_id: str | None = None) -> str:
 
 
 def smartthings_get_device_status(device_id: str, task_id: str | None = None) -> str:
+    logger.info("[tool] get_device_status (device_id=%s)", device_id)
     c = _client()
     if not c:
         return _err("SmartThings client unavailable.")
@@ -99,19 +107,26 @@ def smartthings_send_command(
     arguments: list | None = None,
     task_id: str | None = None,
 ) -> str:
+    logger.info(
+        "[tool] send_command (device_id=%s, command=%s, cap=%s, component=%s, args=%s)",
+        device_id, command, capability, component, arguments,
+    )
     c = _client()
     if not c:
         return _err("SmartThings client unavailable.")
-    return json.dumps(
-        c.send_command(
-            device_id, command,
-            capability=capability, component=component, arguments=arguments or []
-        ),
-        indent=2,
+    result = c.send_command(
+        device_id, command,
+        capability=capability, component=component, arguments=arguments or [],
     )
+    if result.get("error"):
+        logger.warning("Command failed: %s", result.get("message"))
+    else:
+        logger.info("Command succeeded")
+    return json.dumps(result, indent=2)
 
 
 def smartthings_list_rooms(location_id: str, task_id: str | None = None) -> str:
+    logger.info("[tool] list_rooms (location_id=%s)", location_id)
     c = _client()
     if not c:
         return _err("SmartThings client unavailable.")
@@ -119,6 +134,7 @@ def smartthings_list_rooms(location_id: str, task_id: str | None = None) -> str:
 
 
 def smartthings_list_modes(location_id: str, task_id: str | None = None) -> str:
+    logger.info("[tool] list_modes (location_id=%s)", location_id)
     c = _client()
     if not c:
         return _err("SmartThings client unavailable.")
@@ -126,6 +142,7 @@ def smartthings_list_modes(location_id: str, task_id: str | None = None) -> str:
 
 
 def smartthings_get_current_mode(location_id: str, task_id: str | None = None) -> str:
+    logger.info("[tool] get_current_mode (location_id=%s)", location_id)
     c = _client()
     if not c:
         return _err("SmartThings client unavailable.")
@@ -133,6 +150,7 @@ def smartthings_get_current_mode(location_id: str, task_id: str | None = None) -
 
 
 def smartthings_set_mode(location_id: str, mode_id: str, task_id: str | None = None) -> str:
+    logger.info("[tool] set_mode (location_id=%s, mode_id=%s)", location_id, mode_id)
     c = _client()
     if not c:
         return _err("SmartThings client unavailable.")
@@ -149,7 +167,7 @@ _TOOL_SPECS = [
      {"device_id": {"type": "string", "description": "Device UUID"}}, ["device_id"]),
     ("smartthings_get_device_status", "Get real-time attribute values (temperature, switch, lock, etc.).",
      {"device_id": {"type": "string", "description": "Device UUID"}}, ["device_id"]),
-    ("smartthings_send_command", "Send a command to a device. Common: on, off, setLevel, lock, setColor.",
+    ("smartthings_send_command", "Send a command. Common: on, off, setLevel, lock, setColor. Capability auto-inferred.",
      {
          "device_id": {"type": "string", "description": "Device UUID"},
          "command": {"type": "string", "description": "Command name (e.g. on, off, setLevel)"},
@@ -183,5 +201,8 @@ for _name, _desc, _params, _required in _TOOL_SPECS:
         schema=_schema,
         handler=lambda args, _n=_name, **kw: globals()[_n](**args, task_id=kw.get("task_id")),
         check_fn=_has_auth,
-        requires_env=["SMARTTHINGS_TOKEN"],  # at minimum this makes toolset visible in listings
+        requires_env=["SMARTTHINGS_TOKEN"],
     )
+    logger.debug("Registered tool: %s", _name)
+
+logger.info("SmartThings toolset loaded (%d tools)", len(_TOOL_SPECS))
