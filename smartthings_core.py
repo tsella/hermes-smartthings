@@ -59,36 +59,32 @@ class SmartThingsClient:
     def _request(self, method: str, path: str, **kwargs) -> dict[str, Any]:
         """Execute an HTTP request and return parsed JSON or an error dict."""
         url = f"{BASE_URL}/{path.lstrip('/')}"
-        logger.debug("%s %s", method.upper(), url)
+        method_up = method.upper()
+        logger.debug("%s %s", method_up, url)
 
         try:
-            resp = requests.request(
-                method, url,
-                headers=self._headers(),
-                timeout=(7, 30),
-                **kwargs,
-            )
+            resp = requests.request(method, url, headers=self._headers(), timeout=(7, 30), **kwargs)
         except requests.RequestException as e:
-            logger.error("Network error on %s %s: %s", method.upper(), url, e)
+            logger.error("Network error on %s %s: %s", method_up, url, e)
             return {"error": True, "status_code": 0, "message": str(e)}
 
-        if not resp.ok:
-            body: dict = {}
-            try:
-                body = resp.json()
-            except Exception:
-                pass
-            msg = body.get("error", {}).get("message") or f"HTTP {resp.status_code}"
-            logger.warning("API error: %s %s → HTTP %d: %s", method.upper(), url, resp.status_code, msg)
-            return {
-                "error": True,
-                "status_code": resp.status_code,
-                "message": msg,
-                "details": body.get("error", {}),
-            }
+        if resp.ok:
+            logger.debug("%s %s → HTTP %d", method_up, url, resp.status_code)
+            return resp.json() if resp.text else {}
 
-        logger.debug("%s %s → HTTP %d", method.upper(), url, resp.status_code)
-        return resp.json() if resp.text else {}
+        body: dict = {}
+        try:
+            body = resp.json()
+        except Exception:
+            pass
+        msg = body.get("error", {}).get("message") or f"HTTP {resp.status_code}"
+        logger.warning("API error: %s %s → HTTP %d: %s", method_up, url, resp.status_code, msg)
+        return {
+            "error": True,
+            "status_code": resp.status_code,
+            "message": msg,
+            "details": body.get("error", {}),
+        }
 
     # ------------------------------------------------------------------
     # Locations

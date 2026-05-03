@@ -37,40 +37,40 @@ def get_token() -> str | None:
     """Return a valid access token (PAT or OAuth), or None."""
     logger.debug("Resolving SmartThings token")
 
-    # 1. PAT from env
+    # PAT is simplest
     pat = os.getenv("SMARTTHINGS_TOKEN")
     if pat:
-        logger.info("Using PAT from SMARTTHINGS_TOKEN env var")
+        logger.info("Using PAT from env var")
         return pat
 
-    # 2. OAuth tokens from file
-    auth = _load_auth()
-    oauth = auth.get("oauth", {})
+    # Load OAuth
+    oauth = _load_auth().get("oauth", {})
     access = oauth.get("access_token")
     if not access:
-        logger.warning("No token found (no PAT env var, no saved OAuth)")
+        logger.warning("No token found (no PAT, no saved OAuth)")
         return None
 
-    # 3. Refresh check
+    # Not expired → use cached
     expires_at = oauth.get("expires_at", 0)
     now = time.time()
-    if now + 600 >= expires_at:
-        logger.info("OAuth access token expired or near expiry; attempting refresh")
-        refresh = oauth.get("refresh_token")
-        if refresh:
-            new_record = _do_refresh(
-                refresh,
-                oauth.get("client_id"),
-                oauth.get("client_secret"),
-            )
-            if new_record:
-                logger.info("Token refreshed successfully")
-                return new_record["access_token"]
-            logger.error("Token refresh failed")
+    if now + 600 < expires_at:
+        logger.debug("Using cached OAuth token (expires in %ds)", int(expires_at - now))
+        return access
+
+    # Expired → refresh
+    logger.info("OAuth token expired; attempting refresh")
+    refresh = oauth.get("refresh_token")
+    if not refresh:
+        logger.error("No refresh token available")
         return None
 
-    logger.debug("Using cached OAuth access token (expires in %ds)", int(expires_at - now))
-    return access
+    new_record = _do_refresh(refresh, oauth.get("client_id"), oauth.get("client_secret"))
+    if new_record:
+        logger.info("Token refreshed successfully")
+        return new_record["access_token"]
+
+    logger.error("Token refresh failed")
+    return None
 
 
 def _do_refresh(refresh_token: str, client_id: str, client_secret: str) -> dict | None:

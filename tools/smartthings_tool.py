@@ -60,101 +60,71 @@ def _client() -> SmartThingsClient | None:
         return None
 
 
-def _err(msg: str) -> str:
-    logger.error("Returning error to Hermes: %s", msg)
-    return json.dumps({"error": True, "message": msg}, indent=2)
+def _tool(fn):
+    """Decorator: resolve client, handle auth errors, log entry/exit."""
+    def wrapper(*args, task_id: str | None = None, **kwargs):
+        name = fn.__name__
+        logger.info("[tool] %s", name)
+        c = _client()
+        if not c:
+            logger.error("Returning error to Hermes: %s unavailable", name)
+            return json.dumps({"error": True, "message": f"{name}: SmartThings client unavailable."}, indent=2)
+        result = fn(c, *args, **kwargs)
+        return json.dumps(result, indent=2)
+    wrapper.__name__ = fn.__name__
+    return wrapper
 
 
-# ── Tool handlers ──────────────────────────────────────────────────
-
-def smartthings_list_locations(task_id: str | None = None) -> str:
-    logger.info("[tool] list_locations")
-    c = _client()
-    if not c:
-        return _err("SmartThings client unavailable. No valid token found.")
-    return json.dumps(c.list_locations(), indent=2)
+@_tool
+def smartthings_list_locations(c):
+    return c.list_locations()
 
 
-def smartthings_list_devices(location_id: str | None = None, task_id: str | None = None) -> str:
-    logger.info("[tool] list_devices (location_id=%s)", location_id)
-    c = _client()
-    if not c:
-        return _err("SmartThings client unavailable.")
-    return json.dumps(c.list_devices(location_id=location_id), indent=2)
+@_tool
+def smartthings_list_devices(c, location_id: str | None = None):
+    return c.list_devices(location_id=location_id)
 
 
-def smartthings_get_device(device_id: str, task_id: str | None = None) -> str:
-    logger.info("[tool] get_device (device_id=%s)", device_id)
-    c = _client()
-    if not c:
-        return _err("SmartThings client unavailable.")
-    return json.dumps(c.get_device(device_id), indent=2)
+@_tool
+def smartthings_get_device(c, device_id: str):
+    return c.get_device(device_id)
 
 
-def smartthings_get_device_status(device_id: str, task_id: str | None = None) -> str:
-    logger.info("[tool] get_device_status (device_id=%s)", device_id)
-    c = _client()
-    if not c:
-        return _err("SmartThings client unavailable.")
-    return json.dumps(c.get_device_status(device_id), indent=2)
+@_tool
+def smartthings_get_device_status(c, device_id: str):
+    return c.get_device_status(device_id)
 
 
-def smartthings_send_command(
-    device_id: str,
-    command: str,
-    capability: str | None = None,
-    component: str = "main",
-    arguments: list | None = None,
-    task_id: str | None = None,
-) -> str:
-    logger.info(
-        "[tool] send_command (device_id=%s, command=%s, cap=%s, component=%s, args=%s)",
-        device_id, command, capability, component, arguments,
-    )
-    c = _client()
-    if not c:
-        return _err("SmartThings client unavailable.")
-    result = c.send_command(
-        device_id, command,
-        capability=capability, component=component, arguments=arguments or [],
-    )
+@_tool
+def smartthings_send_command(c, device_id: str, command: str, capability: str | None = None,
+                             component: str = "main", arguments: list | None = None):
+    result = c.send_command(device_id, command, capability=capability,
+                            component=component, arguments=arguments or [])
     if result.get("error"):
         logger.warning("Command failed: %s", result.get("message"))
     else:
         logger.info("Command succeeded")
-    return json.dumps(result, indent=2)
+    return result
 
 
-def smartthings_list_rooms(location_id: str, task_id: str | None = None) -> str:
-    logger.info("[tool] list_rooms (location_id=%s)", location_id)
-    c = _client()
-    if not c:
-        return _err("SmartThings client unavailable.")
-    return json.dumps(c.list_rooms(location_id), indent=2)
+@_tool
+def smartthings_list_rooms(c, location_id: str):
+    return c.list_rooms(location_id)
 
 
-def smartthings_list_modes(location_id: str, task_id: str | None = None) -> str:
-    logger.info("[tool] list_modes (location_id=%s)", location_id)
-    c = _client()
-    if not c:
-        return _err("SmartThings client unavailable.")
-    return json.dumps(c.list_modes(location_id), indent=2)
+@_tool
+def smartthings_list_modes(c, location_id: str):
+    return c.list_modes(location_id)
 
 
-def smartthings_get_current_mode(location_id: str, task_id: str | None = None) -> str:
-    logger.info("[tool] get_current_mode (location_id=%s)", location_id)
-    c = _client()
-    if not c:
-        return _err("SmartThings client unavailable.")
-    return json.dumps(c.get_current_mode(location_id), indent=2)
+@_tool
+def smartthings_get_current_mode(c, location_id: str):
+    return c.get_current_mode(location_id)
 
 
-def smartthings_set_mode(location_id: str, mode_id: str, task_id: str | None = None) -> str:
-    logger.info("[tool] set_mode (location_id=%s, mode_id=%s)", location_id, mode_id)
-    c = _client()
-    if not c:
-        return _err("SmartThings client unavailable.")
-    return json.dumps(c.set_mode(location_id, mode_id), indent=2)
+@_tool
+def smartthings_set_mode(c, location_id: str, mode_id: str):
+    return c.set_mode(location_id, mode_id)
 
 
 # ── Hermes registry boilerplate ────────────────────────────────────
