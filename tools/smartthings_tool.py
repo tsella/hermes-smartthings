@@ -24,12 +24,11 @@ AUTH_PATHS = (
 
 def _load_json_token(path: str) -> str | None:
     from pathlib import Path
-    p = Path(path).expanduser()
-    if not p.exists():
-        return None
     try:
-        data = json.loads(p.read_text())
+        data = json.loads(Path(path).expanduser().read_text())
     except Exception:
+        return None
+    if not isinstance(data, dict):
         return None
     return data.get("oauth", {}).get("access_token") or data.get("default", {}).get("accessToken")
 

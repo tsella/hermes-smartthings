@@ -39,6 +39,9 @@ def _save_auth(data: dict):
 
 def _parse_cli_creds(creds: dict) -> dict | None:
     """Build an OAuth record from CLI credentials dict."""
+    if not isinstance(creds, dict):
+        logger.warning("CLI credentials file is not a JSON object")
+        return None
     default = creds.get("default", {})
     access = default.get("accessToken")
     if not access:
@@ -48,9 +51,15 @@ def _parse_cli_creds(creds: dict) -> dict | None:
     expires_iso = default.get("expires")
     if expires_iso:
         try:
-            dt = time.strptime(expires_iso.replace("Z", "+0000"), "%Y-%m-%dT%H:%M:%S.%f%z")
-            expires_at = int(time.mktime(dt))
-        except ValueError:
+            iso = expires_iso.replace("Z", "+0000")
+            for fmt in ("%Y-%m-%dT%H:%M:%S.%f%z", "%Y-%m-%dT%H:%M:%S%z"):
+                try:
+                    dt = time.strptime(iso, fmt)
+                    expires_at = int(time.mktime(dt))
+                    break
+                except ValueError:
+                    continue
+        except Exception:
             pass
 
     client_id = None
