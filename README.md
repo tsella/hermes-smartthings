@@ -4,24 +4,33 @@ SmartThings API client + Hermes skill for controlling Samsung SmartThings device
 
 ## Auth Setup
 
-### PAT (quick, may expire in 24h)
-```bash
-# Add to ~/.hermes/.env
-SMARTTHINGS_TOKEN=pat-xxxx-xxxx-xxxx
-```
+Three token sources are checked in this order:
 
-### OAuth (recommended — persistent, auto-refresh)
-1. `npm install -g @smartthings/cli` then `smartthings apps:create`
-2. Add to `~/.hermes/.env`:
+1. **PAT** (quickest, may expire in 24h)
    ```bash
-   SMARTTHINGS_CLIENT_ID=your_id
-   SMARTTHINGS_CLIENT_SECRET=your_secret
+   # Add to ~/.hermes/.env
+   SMARTTHINGS_TOKEN=pat-xxxx-xxxx-xxxx
    ```
-3. Run flow:
+
+2. **OAuth via SmartThings CLI** (zero-config fallback)
    ```bash
-   cd ~/projects/hermes-smartthings
-   python -c "from auth import start_oauth_flow; start_oauth_flow('YOUR_ID', 'YOUR_SECRET')"
+   npm install -g @smartthings/cli
+   smartthings login
    ```
+   Hermes automatically reads tokens from `~/.config/@smartthings/cli/credentials.json`.
+
+3. **OAuth via custom app** (recommended for long-term use)
+   1. `smartthings apps:create`
+   2. Add to `~/.hermes/.env`:
+      ```bash
+      SMARTTHINGS_CLIENT_ID=your_id
+      SMARTTHINGS_CLIENT_SECRET=your_secret
+      ```
+   3. Run flow:
+      ```bash
+      cd ~/projects/hermes-smartthings
+      python -c "from hermes_smartthings.auth import start_oauth_flow; start_oauth_flow('YOUR_ID', 'YOUR_SECRET')"
+      ```
 
 ## Install into Hermes
 
