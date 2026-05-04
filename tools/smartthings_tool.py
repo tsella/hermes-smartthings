@@ -7,13 +7,12 @@ Install:
 """
 import json, os, sys
 from pathlib import Path
+from functools import wraps
 
 # ── Resolve imports ────────────────────────────────────────────────
 _THIS = Path(__file__).resolve()
 _PROJECT_ROOT = _THIS.parent.parent
-sys.path.insert(
-    0, os.getenv("HERMES_SMARTTHINGS_ROOT", str(_PROJECT_ROOT))
-)
+sys.path.insert(0, os.getenv("HERMES_SMARTTHINGS_ROOT", str(_PROJECT_ROOT)))
 
 try:
     from smartthings_core import get_client, SmartThingsClient
@@ -23,33 +22,31 @@ except Exception:
     _OK = False
 
 from tools.registry import registry  # type: ignore[import-unresolved]
-
 from _log import get_logger
 
 logger = get_logger(__name__)
 
+# ── Auth helpers ───────────────────────────────────────────────────
 
-# ── Auth probe (determines toolset availability) ───────────────────
+def _load_json_token(path: Path) -> str | None:
+    """Read a JSON file and return the access token if present."""
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text())
+        return data.get("oauth", {}).get("access_token") or data.get("default", {}).get("accessToken")
+    except Exception:
+        return None
+
 
 def _has_auth() -> bool:
     """Return True if any auth source is present."""
     if os.getenv("SMARTTHINGS_TOKEN"):
         return True
-    token_file = Path.home() / ".hermes" / "smartthings_auth.json"
-    if token_file.exists():
-        try:
-            data = json.loads(token_file.read_text())
-            return bool(data.get("oauth", {}).get("access_token"))
-        except Exception:
-            return False
-    # Fallback to SmartThings CLI OAuth credentials
-    cli_creds = Path.home() / ".config" / "@smartthings" / "cli" / "credentials.json"
-    if cli_creds.exists():
-        try:
-            data = json.loads(cli_creds.read_text())
-            return bool(data.get("default", {}).get("accessToken"))
-        except Exception:
-            return False
+    if _load_json_token(Path.home() / ".hermes" / "smartthings_auth.json"):
+        return True
+    if _load_json_token(Path.home() / ".config" / "@smartthings" / "cli" / "credentials.json"):
+        return True
     return False
 
 
@@ -60,9 +57,7 @@ def _client() -> SmartThingsClient | None:
         logger.warning("SmartThings modules not importable (check HERMES_SMARTTHINGS_ROOT)")
         return None
     try:
-        c = get_client()
-        logger.debug("Client resolved successfully")
-        return c
+        return get_client()
     except RuntimeError as e:
         logger.warning("Client creation failed: %s", e)
         return None
@@ -70,18 +65,18 @@ def _client() -> SmartThingsClient | None:
 
 def _tool(fn):
     """Decorator: resolve client, handle auth errors, log entry/exit."""
+    @wraps(fn)
     def wrapper(*args, task_id: str | None = None, **kwargs):
         name = fn.__name__
         logger.info("[tool] %s", name)
         c = _client()
         if not c:
-            logger.error("Returning error to Hermes: %s unavailable", name)
             return json.dumps({"error": True, "message": f"{name}: SmartThings client unavailable."}, indent=2)
-        result = fn(c, *args, **kwargs)
-        return json.dumps(result, indent=2)
-    wrapper.__name__ = fn.__name__
+        return json.dumps(fn(c, *args, **kwargs), indent=2)
     return wrapper
 
+
+# ── Tool implementations ───────────────────────────────────────────
 
 @_tool
 def smartthings_list_locations(c):
@@ -106,13 +101,8 @@ def smartthings_get_device_status(c, device_id: str):
 @_tool
 def smartthings_send_command(c, device_id: str, command: str, capability: str | None = None,
                              component: str = "main", arguments: list | None = None):
-    result = c.send_command(device_id, command, capability=capability,
-                            component=component, arguments=arguments or [])
-    if result.get("error"):
-        logger.warning("Command failed: %s", result.get("message"))
-    else:
-        logger.info("Command succeeded")
-    return result
+    return c.send_command(device_id, command, capability=capability,
+                          component=component, arguments=arguments or [])
 
 
 @_tool
@@ -179,7 +169,6 @@ for _name, _desc, _params, _required in _TOOL_SPECS:
         schema=_schema,
         handler=lambda args, _n=_name, **kw: globals()[_n](**args, task_id=kw.get("task_id")),
         check_fn=_has_auth,
-        requires_env=["SMARTTHINGS_TOKEN"],
     )
     logger.debug("Registered tool: %s", _name)
 
