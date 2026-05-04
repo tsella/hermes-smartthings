@@ -158,6 +158,24 @@ This only needs to happen once — after `set_default_location`, all subsequent 
 
 Pass `capability` explicitly if a command fails or isn't in the known map.
 
+## Logging
+
+All operations are logged to `~/.hermes/logs/smartthings.log`:
+- 50 MB rotation, 7-day retention
+- Timestamps, levels, file:function:line in every line
+- **All tokens, passwords, and secrets are automatically redacted**
+
+**Log level is configurable** via `~/.hermes/smartthings_config.json`:
+
+```json
+{
+  "log_level": "DEBUG",
+  "console_log_level": "WARNING"
+}
+```
+
+Valid values: `DEBUG`, `INFO` (default), `WARNING`, `ERROR`, `CRITICAL`. The `console_log_level` controls stderr output independently (defaults to `WARNING`).
+
 ## Samsung TV Pitfalls
 
 ### Don't trust the `label` / `name` field for device identification
