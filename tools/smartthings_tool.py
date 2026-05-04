@@ -42,6 +42,14 @@ def _has_auth() -> bool:
             return bool(data.get("oauth", {}).get("access_token"))
         except Exception:
             return False
+    # Fallback to SmartThings CLI OAuth credentials
+    cli_creds = Path.home() / ".config" / "@smartthings" / "cli" / "credentials.json"
+    if cli_creds.exists():
+        try:
+            data = json.loads(cli_creds.read_text())
+            return bool(data.get("default", {}).get("accessToken"))
+        except Exception:
+            return False
     return False
 
 
