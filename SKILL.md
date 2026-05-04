@@ -50,13 +50,7 @@ The CLI tries to open a GUI browser automatically. On headless hosts, three appr
 **Approach A — Use the CLI credentials bridge (easiest)**
 Run `smartthings login` from a machine with a browser, then copy `~/.config/@smartthings/cli/credentials.json` to the headless host. Hermes will read it automatically.
 
-**Approach B — Patch the CLI JS (headless capture)**
-If you must authenticate on the headless host itself, patch `login-authenticator.js` to write the OAuth URL to a temp file instead of opening a browser. See `references/headless-oauth-patch.md`.
-
-**Approach C — HTTPS reverse proxy** (advanced)
-If the browser is remote and the host is behind NAT, use nginx with a valid LetsEncrypt certificate as a reverse proxy to the CLI's local Express server. See `references/headless-oauth-patch.md` for the nginx config template.
-
-⚠️ **User preference: avoid patching the SmartThings CLI JS unless necessary.** The credentials bridge (1b) is the preferred path.
+⚠️ **The CLI credentials bridge (Approach A) is the preferred authentication method. Avoid modifying the SmartThings CLI JS.**
 
 ---
 

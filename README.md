@@ -120,7 +120,6 @@ Console (stderr) output defaults to `WARNING`; override with `console_log_level`
 ├── tools/
 │   └── smartthings_tool.py  # Hermes tool registration
 ├── references/
-│   ├── headless-oauth-patch.md
 │   ├── hermes-integration.md
 │   ├── location-scoping.md
 │   └── modular-tool-discovery.md
