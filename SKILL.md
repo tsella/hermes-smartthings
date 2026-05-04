@@ -1,178 +1,180 @@
 ---
 name: smartthings
-version: 0.2.0
+version: 0.5.1
 author: Tom Sella
-description: "Samsung SmartThings integration for Hermes Agent — PAT or OAuth."
+description: "Samsung SmartThings integration for Hermes Agent — domain-specific skill referencing the rest-api-tool-builder pattern."
+license: MIT
 metadata:
   hermes:
-    tags: [smarthome, samsung, smartthings, home-automation]
-    requires: ["SMARTTHINGS_TOKEN"]
-    platform: [cli, telegram, discord, whatsapp]
+    tags: [smarthome, samsung, smartthings]
+    related_skills: [rest-api-tool-builder, smart-home-rest-toolset]
+    requires: []
 ---
 
 # Hermes SmartThings Integration
 
-Direct SmartThings API control for Hermes Agent. No Home Assistant bridge.
+Hermes toolset for Samsung SmartThings. Built using the **rest-api-tool-builder** pattern.
 
-## Prerequisites
+All device/scene/room/mode operations are **location-scoped** — never mixed across locations. Set a default location once and every tool that depends on location uses it automatically.
 
-1. Samsung SmartThings account
-2. One of:
-   - **PAT** (Personal Access Token) — quick, but may expire in 24h for newly created tokens
-   - **OAuth credentials** — client_id + client_secret from a registered SmartThings OAuth app. Persistent, auto-refreshing.
+## Setup
 
-## Auth Setup
+### 1. Auth (pick one — checked in this order)
 
-### Option A: PAT (fastest, for testing)
-
-1. Visit [SmartThings Account → Personal Access Tokens](https://account.smartthings.com)
-2. Generate a token with scopes: `r:devices:* w:devices:* r:locations:* r:rules:*`
-3. Add to `~/.hermes/.env`:
-
+**A. PAT** (fastest, may expire in 24h):
 ```bash
-SMARTTHINGS_TOKEN=pat-xxxx-xxxx-xxxx
+# ~/.hermes/.env
+SMARTTHINGS_TOKEN=pat-xxxx
 ```
 
-### Option B: OAuth (recommended for daily use)
-
-SmartThings PAT lifetime is shrinking. OAuth gives persistent access via refresh tokens.
-
-1. **Register an OAuth app**:
-   - Install [SmartThings CLI](https://developer.smartthings.com/docs/sdks/cli)
-   - Run `smartthings apps:create` → choose **OAuth-In SmartApp**
-   - Set a Display Name, Description, Permissions (`r:devices:* w:devices:* r:locations:* w:locations:*`)
-   - Add Redirect URI: `http://127.0.0.1:8127/callback`
-   - Save the generated **Client ID** and **Client Secret**
-
-2. **Add credentials to `~/.hermes/.env`**:
-
+**B. OAuth via SmartThings CLI** (zero-config — recommended if you already use the CLI):
 ```bash
-SMARTTHINGS_CLIENT_ID=your_client_id
-SMARTTHINGS_CLIENT_SECRET=your_client_secret
+npm install -g @smartthings/cli
+smartthings login   # completes OAuth in browser
 ```
+Hermes automatically reads tokens from `~/.config/@smartthings/cli/credentials.json`. No env vars needed.
 
-3. **Run the OAuth flow** (one-time setup):
-
+**C. Custom OAuth app** (long-term, auto-refresh):
 ```bash
-cd ~/projects/hermes-smartthings
-python -c "from auth import start_oauth_flow; start_oauth_flow('YOUR_CLIENT_ID', 'YOUR_CLIENT_SECRET')"
+SMARTTHINGS_CLIENT_ID=xxx
+SMARTTHINGS_CLIENT_SECRET=xxx
+python -c "from hermes_smartthings.auth import start_oauth_flow; start_oauth_flow('YOUR_ID', 'YOUR_SECRET')"
 ```
-
-This opens a browser, asks you to log into SmartThings and authorize. Tokens are saved to `~/.hermes/smartthings_auth.json` and auto-refreshed before expiry.
-
-## Hermes Integration
-
-### 1. Install tool symlink
-
-```bash
-ln -s ~/projects/hermes-smartthings/tools/smartthings_tool.py ~/.hermes/hermes-agent/tools/smartthings_tool.py
-```
-
-### 2. Ensure PYTHONPATH
-
-```bash
-export HERMES_SMARTTHINGS_ROOT=~/projects/hermes-smartthings
-# add to ~/.bashrc or ~/.zshrc for persistence
-```
-
-### 3. Enable toolset
-
-```bash
-hermes tools enable smartthings
-```
-
-Restart Hermes (`/reset` or new session).
-
-### 4. Verify
-
-> "List my SmartThings locations."
-
-Expected: JSON with `items` array of locations.
 
 ---
 
-## Tools
+### 2. SmartThings CLI OAuth on Headless Linux
 
-| Tool | Purpose | Typical Args |
-|---|---|---|
-| `smartthings_list_locations` | All locations | None |
-| `smartthings_list_devices` | Devices (optionally per location) | `location_id` |
-| `smartthings_get_device` | Full device profile + capabilities | `device_id` |
-| `smartthings_get_device_status` | Real-time attribute values | `device_id` |
-| `smartthings_send_command` | Execute a device command | `device_id`, `command` (e.g. "on", "off", "setLevel") |
-| `smartthings_list_rooms` | Rooms in a location | `location_id` |
-| `smartthings_list_modes` | Location modes | `location_id` |
-| `smartthings_get_current_mode` | Active mode | `location_id` |
-| `smartthings_set_mode` | Change location mode | `location_id`, `mode_id` |
+The CLI tries to open a GUI browser automatically. On headless hosts, three approaches:
 
----
+**Approach A — Use the CLI credentials bridge (easiest)**
+Run `smartthings login` from a machine with a browser, then copy `~/.config/@smartthings/cli/credentials.json` to the headless host. Hermes will read it automatically.
 
-## Usage Examples
+**Approach B — Patch the CLI JS (headless capture)**
+If you must authenticate on the headless host itself, patch `login-authenticator.js` to write the OAuth URL to a temp file instead of opening a browser. See `references/headless-oauth-patch.md`.
 
-> "Turn on the living room light."
+**Approach C — HTTPS reverse proxy** (advanced)
+If the browser is remote and the host is behind NAT, use nginx with a valid LetsEncrypt certificate as a reverse proxy to the CLI's local Express server. See `references/headless-oauth-patch.md` for the nginx config template.
 
-Flow:
-1. `smartthings_list_devices` → find "Living Room Light" ID
-2. `smartthings_get_device` → verify `switch` capability, `on` command
-3. `smartthings_send_command` → `{device_id: "xxx", command: "on"}`
+⚠️ **User preference: avoid patching the SmartThings CLI JS unless necessary.** The credentials bridge (1b) is the preferred path.
 
 ---
 
-> "Dim the bedroom light to 30%."
+### 3. OAuth Bridge from CLI
 
-Flow:
-1. Find bedroom light device
-2. `smartthings_get_device_status` → confirm it's on, get current level
-3. `smartthings_send_command` → `{device_id: "xxx", command: "setLevel", arguments: [30]}`
+This is implemented in `auth.py` via the `_load_cli_credentials()` fallback:
+- `CLI_CREDENTIALS_FILE` = `~/.config/@smartthings/cli/credentials.json`
+- Parses `accessToken`, `refreshToken`, `expires` from the `default` profile
+- Refresh uses PKCE public-client grant (no `client_secret`)
 
----
+See `references/hermes-integration.md` for the exact code pattern.
 
-> "Set the house to Away mode."
+To enable the bridge, ensure `auth.py` contains:
+- `CLI_CREDENTIALS_FILE` pointing to `~/.config/@smartthings/cli/credentials.json`
+- `_load_cli_credentials()` to parse the JSON + extract `accessToken`, `refreshToken`, `expires`
+- `_do_refresh_public()` for token refresh without `client_secret`
+- Fallback in `get_token()` before returning None
 
-Flow:
-1. `smartthings_list_locations` → get location ID
-2. `smartthings_list_modes` → find "Away" mode ID
-3. `smartthings_set_mode` → apply
+See `references/hermes-integration.md` for the exact patch.
 
----
+### 4. Hermes Toolset Registration
 
-## Capability Quick Reference
+**Primary way (zero core patches):**
 
-| Command | Capability | Arguments |
+Drop a tool file in `~/.hermes/hermes-agent/tools/` that calls `registry.register()`, and Hermes auto-discovers it. The `check_fn` controls whether the toolset appears in the schema based on runtime auth state.
+
+For this project, symlink the tool file and install the package:
+```bash
+ln -s ~/projects/hermes-smartthings/tools/smartthings_tool.py ~/.hermes/hermes-agent/tools/
+pip install -e ~/projects/hermes-smartthings
+```
+
+That's it. The AI can use the tools immediately. No core Hermes code needs to change.
+
+**Pitfall (learned the hard way):** Do NOT patch core Hermes (`toolsets.py`, `tools_config.py`, `config.yaml`) to get the toolset visible in `hermes tools list`. Those patches are purely cosmetic (TUI checklist) and break on every Hermes update. If you need the toolset in the TUI checklist, accept that core patches are temporary and document them separately. The tools themselves work via auto-discovery alone.
+
+See `references/modular-tool-discovery.md` for why this works and how to verify it.
+
+See `references/hermes-integration.md` for the full (optional) core patch instructions, but prefer the zero-core-patch approach above.
+
+## Available Tools
+
+| Tool | Purpose |
+|---|---|
+| `smartthings_set_default_location` | Set the default location for scoping |
+| `smartthings_get_default_location` | Read the configured default location |
+| `smartthings_list_locations` | List all locations |
+| `smartthings_list_devices` | Devices **scoped to configured location** |
+| `smartthings_get_device` | Full profile + capabilities |
+| `smartthings_get_device_status` | Real-time attribute values |
+| `smartthings_send_command` | Execute commands (on, off, setLevel, lock, etc.) |
+| `smartthings_list_rooms` | Rooms in the default location |
+| `smartthings_list_modes` | Location modes (default location) |
+| `smartthings_get_current_mode` | Active mode (default location) |
+| `smartthings_set_mode` | Change mode (default location) |
+| `smartthings_list_scenes` | Scenes in the default location |
+| `smartthings_execute_scene` | Run a scene by ID |
+
+## Location Scoping
+
+**Devices, rooms, modes, and scenes are NEVER mixed across locations.**
+All tools that accept `location_id` use a `@_require_location` decorator that:
+1. Returns the explicit `location_id` if provided
+2. Falls back to the configured default from `~/.hermes/smartthings_config.json`
+3. Returns a clear error if neither is set
+
+### How to handle "no default location"
+
+If a location-scoped call fails because no default is configured, the AI **must**:
+1. Call `smartthings_list_locations`
+2. Show the list to the user
+3. Ask which location to use
+4. Call `smartthings_set_default_location(location_id="...")` with the user's choice
+5. Retry the original operation
+
+This only needs to happen once — after `set_default_location`, all subsequent calls are automatically scoped.
+
+## Common Commands
+
+| Command | Capability | Args |
 |---|---|---|
 | `on`, `off` | `switch` | none |
 | `setLevel` | `switchLevel` | `[0-100]` |
 | `setColor` | `colorControl` | `[{"hue":0-360,"saturation":0-100}]` |
 | `lock`, `unlock` | `lock` | none |
-| `setHeatingSetpoint` | `thermostatHeatingSetpoint` | `[temperature]` |
-| `setCoolingSetpoint` | `thermostatCoolingSetpoint` | `[temperature]` |
-| `setThermostatMode` | `thermostatMode` | `["heat","cool","auto","off"]` |
 | `open`, `close` | `doorControl` | none |
+| `play`, `pause`, `stop` | `mediaPlayback` | none |
+| `setVolume`, `volumeUp`, `volumeDown` | `audioVolume` | `[0-100]` or none |
 
-If a command fails with "unknown command", pass `capability` explicitly and inspect the device with `smartthings_get_device`.
+## Capability Auto-Inference
+
+`send_command` automatically maps common commands to capabilities:
+- `on`/`off` → `switch`
+- `setLevel` → `switchLevel`
+- `lock`/`unlock` → `lock`
+- `open`/`close` → `doorControl`
+- `play`/`pause`/`stop` → `mediaPlayback`
+- `setVolume`/`volumeUp`/`volumeDown` → `audioVolume`
+
+Pass `capability` explicitly if a command fails or isn't in the known map.
 
 ## Safety
 
-- No approval interlocks by default. Sensitive devices (locks, garage doors) execute immediately.
-- Consider `hermes config set approvals.mode smart` for prompting on high-risk commands.
+- Commands execute immediately (no approval interlocks by default)
+- Set `approvals.mode: smart` for high-risk devices (locks, garage doors)
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
-| "SmartThings client unavailable" | Set auth (PAT or OAuth) in `.env` / run OAuth flow |
-| HTTP 401 | Token expired. PAT: regenerate. OAuth: delete `~/.hermes/smartthings_auth.json` and re-run flow. |
-| HTTP 403 | Token lacks scope. Re-create with broader scopes. |
-| "unknown command" | Pass `capability` explicitly. Use `smartthings_get_device` to inspect capabilities. |
-| Device not responding | Check device online in SmartThings mobile app. |
-| OAuth browser doesn't open | Manually visit the printed auth URL. |
-| OAuth redirect URI mismatch | Ensure `http://127.0.0.1:8127/callback` is registered in your SmartThings OAuth app. |
+| "client unavailable" | Check auth (PAT env or OAuth file) |
+| HTTP 401 | Token expired. Regenerate PAT or re-run OAuth flow |
+| "unknown command" | Pass explicit `capability` |
+| "No default location configured" | Call `smartthings_list_locations`, ask user to pick, then `smartthings_set_default_location` |
+| CLI tries to open browser on headless host | Patch `login-authenticator.js` per headless OAuth guide above |
 
 ## References
 
-- [SmartThings Capabilities Reference](https://developer.smartthings.com/docs/devices/capabilities/capabilities-reference)
-- [SmartThings Public API Docs](https://developer.smartthings.com/docs/api/public)
+- [SmartThings Capabilities](https://developer.smartthings.com/docs/devices/capabilities/capabilities-reference)
 - [SmartThings OAuth Guide](https://developer.smartthings.com/docs/connected-services/oauth-integrations)
-
-## License
-MIT
+- `references/location-scoping.md` — design notes on the `@_require_location` pattern and config file format
