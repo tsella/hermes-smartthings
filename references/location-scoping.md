@@ -16,7 +16,9 @@ A SmartThings account can have multiple locations (e.g., primary home + vacation
   "locations": {
     "abc123...": {"name": "Home"},
     "def456...": {"name": "Lake House"}
-  }
+  },
+  "log_level": "INFO",
+  "console_log_level": "WARNING"
 }
 ```
 
