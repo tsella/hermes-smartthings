@@ -187,6 +187,22 @@ class SmartThingsClient:
             json={"modeId": mode_id},
         )
 
+    # ------------------------------------------------------------------
+    # Scenes
+    # ------------------------------------------------------------------
+    def list_scenes(self, location_id: str | None = None) -> dict:
+        params = {}
+        if location_id:
+            params["locationId"] = location_id
+            logger.info("Listing scenes for location %s", location_id)
+        else:
+            logger.info("Listing all scenes")
+        return self._request("GET", "/scenes", params=params)
+
+    def execute_scene(self, scene_id: str) -> dict:
+        logger.info("Executing scene %s", scene_id)
+        return self._request("POST", f"/scenes/{scene_id}/execute")
+
 
 def get_client() -> SmartThingsClient:
     """Factory: resolve auth and return a ready client."""

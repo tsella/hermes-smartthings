@@ -14,6 +14,7 @@ from tools.registry import registry  # type: ignore[import-unresolved]
 
 from hermes_smartthings.smartthings_core import get_client, SmartThingsClient
 from hermes_smartthings.auth import get_token
+from hermes_smartthings import config as loc_config
 
 
 # ── Auth helper ────────────────────────────────────────────────────
@@ -67,15 +68,56 @@ def _tool(fn):
     return wrapper
 
 
-# ── Tool implementations ───────────────────────────────────────────
+def _require_location(fn):
+    """Decorator: resolve location_id from config if omitted."""
+    @wraps(fn)
+    def wrapper(c, location_id: str | None = None, *args, **kwargs):
+        resolved = loc_config.resolve_location_id(location_id)
+        if not resolved:
+            return {
+                "error": True,
+                "message": (
+                    "No location specified and no default location configured.\n"
+                    "Run: smartthings_set_default_location(location_id='...')"
+                ),
+            }
+        return fn(c, resolved, *args, **kwargs)
+    return wrapper
+
+
+# ── Location config tools ──────────────────────────────────────────
+
+@_tool
+def smartthings_set_default_location(c, location_id: str):
+    """Set the default location for all device/scene operations."""
+    loc_config.set_default_location(location_id)
+    return {"success": True, "default_location_id": location_id}
+
+
+@_tool
+def smartthings_get_default_location(c):
+    """Get the currently configured default location."""
+    loc_id = loc_config.get_default_location()
+    locations = loc_config.get_locations()
+    name = locations.get(loc_id, {}).get("name", "") if loc_id else ""
+    if not loc_id:
+        return {
+            "error": True,
+            "message": "No default location configured. Run smartthings_set_default_location().",
+        }
+    return {"default_location_id": loc_id, "name": name}
+
 
 @_tool
 def smartthings_list_locations(c):
     return c.list_locations()
 
 
+# ── Device tools (location-scoped) ─────────────────────────────────
+
 @_tool
-def smartthings_list_devices(c, location_id: str | None = None):
+@_require_location
+def smartthings_list_devices(c, location_id: str):
     return c.list_devices(location_id=location_id)
 
 
@@ -96,32 +138,56 @@ def smartthings_send_command(c, device_id: str, command: str, capability: str | 
                           component=component, arguments=arguments or [])
 
 
+# ── Room tools ─────────────────────────────────────────────────────
+
 @_tool
+@_require_location
 def smartthings_list_rooms(c, location_id: str):
     return c.list_rooms(location_id)
 
 
+# ── Mode tools ─────────────────────────────────────────────────────
+
 @_tool
+@_require_location
 def smartthings_list_modes(c, location_id: str):
     return c.list_modes(location_id)
 
 
 @_tool
+@_require_location
 def smartthings_get_current_mode(c, location_id: str):
     return c.get_current_mode(location_id)
 
 
 @_tool
+@_require_location
 def smartthings_set_mode(c, location_id: str, mode_id: str):
     return c.set_mode(location_id, mode_id)
+
+
+# ── Scene tools ────────────────────────────────────────────────────
+
+@_tool
+@_require_location
+def smartthings_list_scenes(c, location_id: str):
+    return c.list_scenes(location_id=location_id)
+
+
+@_tool
+def smartthings_execute_scene(c, scene_id: str):
+    return c.execute_scene(scene_id)
 
 
 # ── Hermes registry boilerplate ────────────────────────────────────
 
 _TOOL_SPECS = [
+    ("smartthings_set_default_location", "Set the default location for all device/scene operations.",
+     {"location_id": {"type": "string", "description": "Location UUID"}}, ["location_id"]),
+    ("smartthings_get_default_location", "Get the currently configured default location.", {}, []),
     ("smartthings_list_locations", "List all SmartThings locations.", {}, []),
-    ("smartthings_list_devices", "List devices. Optionally filter by location_id.",
-     {"location_id": {"type": "string", "description": "Location UUID (optional)"}}, []),
+    ("smartthings_list_devices", "List devices in the default (or specified) location. Never mixes locations.",
+     {"location_id": {"type": "string", "description": "Location UUID (optional — falls back to default)"}}, []),
     ("smartthings_get_device", "Get full device status, capabilities, and components.",
      {"device_id": {"type": "string", "description": "Device UUID"}}, ["device_id"]),
     ("smartthings_get_device_status", "Get real-time attribute values (temperature, switch, lock, etc.).",
@@ -134,17 +200,21 @@ _TOOL_SPECS = [
          "component": {"type": "string", "description": "Component, usually main", "default": "main"},
          "arguments": {"type": "array", "description": "Positional args list (e.g. [50])"},
      }, ["device_id", "command"]),
-    ("smartthings_list_rooms", "List rooms in a location.",
-     {"location_id": {"type": "string", "description": "Location UUID"}}, ["location_id"]),
-    ("smartthings_list_modes", "List modes (Home, Away, Night, etc.).",
-     {"location_id": {"type": "string", "description": "Location UUID"}}, ["location_id"]),
-    ("smartthings_get_current_mode", "Get the currently active mode.",
-     {"location_id": {"type": "string", "description": "Location UUID"}}, ["location_id"]),
-    ("smartthings_set_mode", "Change the current mode.",
+    ("smartthings_list_rooms", "List rooms in the default (or specified) location.",
+     {"location_id": {"type": "string", "description": "Location UUID (optional)"}}, []),
+    ("smartthings_list_modes", "List modes (Home, Away, Night, etc.) for the default location.",
+     {"location_id": {"type": "string", "description": "Location UUID (optional)"}}, []),
+    ("smartthings_get_current_mode", "Get the currently active mode for the default location.",
+     {"location_id": {"type": "string", "description": "Location UUID (optional)"}}, []),
+    ("smartthings_set_mode", "Change the current mode for the default location.",
      {
-         "location_id": {"type": "string", "description": "Location UUID"},
+         "location_id": {"type": "string", "description": "Location UUID (optional)"},
          "mode_id": {"type": "string", "description": "Mode UUID"},
-     }, ["location_id", "mode_id"]),
+     }, ["mode_id"]),
+    ("smartthings_list_scenes", "List scenes for the default (or specified) location.",
+     {"location_id": {"type": "string", "description": "Location UUID (optional)"}}, []),
+    ("smartthings_execute_scene", "Run a scene by its ID.",
+     {"scene_id": {"type": "string", "description": "Scene UUID"}}, ["scene_id"]),
 ]
 
 
