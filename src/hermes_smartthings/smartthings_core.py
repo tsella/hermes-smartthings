@@ -24,7 +24,7 @@ _COMMAND_CAP_MAP: dict[str, str] = {
     "setColor": "colorControl",
     "setColorTemperature": "colorTemperature",
     "open": "doorControl",
-    "close": "doorControl",
+    "close": "windowShade",
     "mute": "audioMute",
     "unmute": "audioMute",
     "setVolume": "audioVolume",

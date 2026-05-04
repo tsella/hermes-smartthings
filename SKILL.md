@@ -136,8 +136,10 @@ This only needs to happen once — after `set_default_location`, all subsequent 
 | `setLevel` | `switchLevel` | `[0-100]` |
 | `setColor` | `colorControl` | `[{"hue":0-360,"saturation":0-100}]` |
 | `lock`, `unlock` | `lock` | none |
-| `open`, `close` | `doorControl` | none |
-| `play`, `pause`, `stop` | `mediaPlayback` | none |
+| `open` | `doorControl` | none |
+| `close` | `windowShade` | none |
+| `pause` | `mediaPlayback` | none |
+| `play`, `stop` | `mediaPlayback` | none |
 | `setVolume`, `volumeUp`, `volumeDown` | `audioVolume` | `[0-100]` or none |
 
 ## Capability Auto-Inference
@@ -146,7 +148,8 @@ This only needs to happen once — after `set_default_location`, all subsequent 
 - `on`/`off` → `switch`
 - `setLevel` → `switchLevel`
 - `lock`/`unlock` → `lock`
-- `open`/`close` → `doorControl`
+- `open` → `doorControl`
+- `close` → `windowShade` (shades and blinds)
 - `play`/`pause`/`stop` → `mediaPlayback`
 - `setVolume`/`volumeUp`/`volumeDown` → `audioVolume`
 
@@ -211,11 +214,24 @@ The `tvChannelName` attribute (e.g., `"org.tizen.netflix-app"`) is **often stale
 | HTTP 401 | Token expired. Regenerate PAT or re-run OAuth flow |
 | "unknown command" | Pass explicit `capability` |
 | "No default location configured" | Call `smartthings_list_locations`, ask user to pick, then `smartthings_set_default_location` |
-| CLI tries to open browser on headless host | Patch `login-authenticator.js` per headless OAuth guide above |
+| CLI tries to open browser on headless host | Run `smartthings login` on a machine with a browser, then copy `~/.config/@smartthings/cli/credentials.json` to the headless host. Hermes reads it automatically. |
 
+## API Response Shapes
+
+**Pitfall:** SmartThings REST endpoints return wrapped dicts, not bare lists.
+- `list_devices` → `{"items": [...]}`
+- `get_device_status` → `{"components": {"main": {...}}}`
+- `list_scenes` → `{"items": [...]}`
+- `list_locations` → `{"items": [...]}`
+- `get_current_mode` → single dict (not wrapped)
+
+See `references/api-response-shapes.md` for full examples and safe access patterns.
+
+- `references/shade-commands.md` — windowShade commands, status interpretation, `close` vs `doorControl` pitfall
 ## References
 
 - [SmartThings Capabilities](https://developer.smartthings.com/docs/devices/capabilities/capabilities-reference)
 - [SmartThings OAuth Guide](https://developer.smartthings.com/docs/connected-services/oauth-integrations)
+- `references/api-response-shapes.md` — common API response structures and safe parsing patterns
 - `references/location-scoping.md` — design notes on the `@_require_location` pattern and config file format
 - `references/samsung-tv-http-409.md` — debugging Samsung TV power-off failures (HTTP 409 invalid device state)
