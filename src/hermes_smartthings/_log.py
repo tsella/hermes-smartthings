@@ -6,7 +6,9 @@ Features:
 - RotatingFileHandler: 50 MB per file
 - TimedRotatingFileHandler: 7-day retention (keeps last 7 daily backups)
 - Log to ~/.hermes/logs/smartthings.log
+- Log level configurable in ~/.hermes/smartthings_config.json under "log_level"
 """
+import json
 import logging
 import logging.handlers
 import os
@@ -17,6 +19,7 @@ LOG_DIR = Path.home() / ".hermes" / "logs"
 LOG_FILE = LOG_DIR / "smartthings.log"
 MAX_BYTES = 50 * 1024 * 1024      # 50 MB
 BACKUP_COUNT = 7                  # 7 days/rotations kept
+CONFIG_FILE = Path.home() / ".hermes" / "smartthings_config.json"
 
 # Patterns to redact in log messages
 _REDACT_PATTERNS = [
@@ -79,6 +82,18 @@ def _cleanup_old_logs():
             pass
 
 
+def _get_log_level() -> int:
+    """Read log level from config; default to INFO."""
+    if not CONFIG_FILE.exists():
+        return logging.INFO
+    try:
+        data = json.loads(CONFIG_FILE.read_text())
+        level_name = data.get("log_level", "INFO")
+        return getattr(logging, level_name.upper(), logging.INFO)
+    except Exception:
+        return logging.INFO
+
+
 def get_logger(name: str) -> logging.Logger:
     """Return a configured logger for the given module name.
 
@@ -88,7 +103,8 @@ def get_logger(name: str) -> logging.Logger:
     if getattr(logger, "_st_configured", False):
         return logger
 
-    logger.setLevel(logging.DEBUG)
+    level = _get_log_level()
+    logger.setLevel(level)
 
     # Ensure log directory exists
     LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -97,6 +113,7 @@ def get_logger(name: str) -> logging.Logger:
     handler = logging.handlers.RotatingFileHandler(
         LOG_FILE, maxBytes=MAX_BYTES, backupCount=BACKUP_COUNT, encoding="utf-8"
     )
+    handler.setLevel(level)
     handler.setFormatter(DetailedFormatter(_DEFAULT_FMT, _DEFAULT_DATEFMT))
 
     # Redact sensitive data
@@ -106,9 +123,20 @@ def get_logger(name: str) -> logging.Logger:
 
     logger.addHandler(handler)
 
-    # Also add a stderr handler at WARNING+ for quick visibility
+    # Also add a stderr handler
     console = logging.StreamHandler()
-    console.setLevel(logging.WARNING)
+    # Console defaults to WARNING to avoid spamming stderr with INFO/DEBUG.
+    # If user explicitly sets "console_log_level", respect it.
+    console_level = logging.WARNING
+    if CONFIG_FILE.exists():
+        try:
+            data = json.loads(CONFIG_FILE.read_text())
+            explicit = data.get("console_log_level")
+            if explicit:
+                console_level = getattr(logging, explicit.upper(), logging.WARNING)
+        except Exception:
+            pass
+    console.setLevel(console_level)
     console.setFormatter(DetailedFormatter(_DEFAULT_FMT, _DEFAULT_DATEFMT))
     console.addFilter(redactor)
     logger.addHandler(console)
