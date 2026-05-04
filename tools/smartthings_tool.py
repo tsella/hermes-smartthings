@@ -1,61 +1,52 @@
 """
 Hermes tool registration for Samsung SmartThings.
 
-Install:
-  ln -s "$PROJECT_ROOT/tools/smartthings_tool.py" "$HOME/.hermes/hermes-agent/tools/smartthings_tool.py"
-  export HERMES_SMARTTHINGS_ROOT=/path/to/hermes-smartthings
+Requires package installation:
+  pip install -e ~/projects/hermes-smartthings
 """
-import json, os, sys
-from pathlib import Path
+import json
+import logging
 from functools import wraps
 
-# ── Resolve imports ────────────────────────────────────────────────
-_THIS = Path(__file__).resolve()
-_PROJECT_ROOT = _THIS.parent.parent
-sys.path.insert(0, os.getenv("HERMES_SMARTTHINGS_ROOT", str(_PROJECT_ROOT)))
-
-try:
-    from smartthings_core import get_client, SmartThingsClient
-    _OK = True
-except Exception:
-    SmartThingsClient = None
-    _OK = False
+logger = logging.getLogger(__name__)
 
 from tools.registry import registry  # type: ignore[import-unresolved]
-from _log import get_logger
 
-logger = get_logger(__name__)
+from hermes_smartthings.smartthings_core import get_client, SmartThingsClient
+from hermes_smartthings.auth import get_token
 
-# ── Auth helpers ───────────────────────────────────────────────────
 
-def _load_json_token(path: Path) -> str | None:
-    """Read a JSON file and return the access token if present."""
-    if not path.exists():
+# ── Auth helper ────────────────────────────────────────────────────
+
+
+def _load_json_token(path: str) -> str | None:
+    import json
+    from pathlib import Path
+    p = Path(path).expanduser()
+    if not p.exists():
         return None
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(p.read_text())
         return data.get("oauth", {}).get("access_token") or data.get("default", {}).get("accessToken")
     except Exception:
         return None
 
 
 def _has_auth() -> bool:
-    """Return True if any auth source is present."""
+    import os
     if os.getenv("SMARTTHINGS_TOKEN"):
         return True
-    if _load_json_token(Path.home() / ".hermes" / "smartthings_auth.json"):
+    if _load_json_token("~/.hermes/smartthings_auth.json"):
         return True
-    if _load_json_token(Path.home() / ".config" / "@smartthings" / "cli" / "credentials.json"):
+    if _load_json_token("~/.config/@smartthings/cli/credentials.json"):
         return True
     return False
 
 
 # ── Client helper ──────────────────────────────────────────────────
 
+
 def _client() -> SmartThingsClient | None:
-    if not _OK:
-        logger.warning("SmartThings modules not importable (check HERMES_SMARTTHINGS_ROOT)")
-        return None
     try:
         return get_client()
     except RuntimeError as e:

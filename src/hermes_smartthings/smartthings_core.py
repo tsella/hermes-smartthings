@@ -3,8 +3,8 @@ import os
 from typing import Any
 import requests
 
-from _log import get_logger
-from auth import get_token
+from ._log import get_logger
+from .auth import get_token
 
 logger = get_logger(__name__)
 

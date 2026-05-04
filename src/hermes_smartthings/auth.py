@@ -3,7 +3,7 @@ import json, os, time, webbrowser, secrets, http.server, socketserver, threading
 from pathlib import Path
 import requests
 
-from _log import get_logger
+from ._log import get_logger
 
 logger = get_logger(__name__)
 

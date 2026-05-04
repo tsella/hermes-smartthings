@@ -4,7 +4,7 @@ import json, os, sys
 _PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.getenv("HERMES_SMARTTHINGS_ROOT", _PROJECT_ROOT))
 
-from smartthings_core import get_client
+from .smartthings_core import get_client
 from _log import get_logger
 
 logger = get_logger("test_client")
