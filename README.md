@@ -95,6 +95,18 @@ All operations are logged to `~/.hermes/logs/smartthings.log`:
 - WARNING: API errors, missing tokens
 - ERROR: Network failures, unrecoverable issues
 
+**Log level is configurable** via `~/.hermes/smartthings_config.json`:
+
+```json
+{
+  "log_level": "DEBUG"
+}
+```
+
+Valid values: `DEBUG`, `INFO` (default), `WARNING`, `ERROR`, `CRITICAL`.
+
+Console (stderr) output defaults to `WARNING`; override with `console_log_level`.
+
 ## Structure
 
 ```
