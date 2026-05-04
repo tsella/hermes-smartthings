@@ -6,6 +6,7 @@ Requires package installation:
 """
 import json
 import logging
+import os
 from functools import wraps
 
 logger = logging.getLogger(__name__)
@@ -13,35 +14,30 @@ logger = logging.getLogger(__name__)
 from tools.registry import registry  # type: ignore[import-unresolved]
 
 from hermes_smartthings.smartthings_core import get_client, SmartThingsClient
-from hermes_smartthings.auth import get_token
 from hermes_smartthings import config as loc_config
 
-
-# ── Auth helper ────────────────────────────────────────────────────
+AUTH_PATHS = (
+    "~/.hermes/smartthings_auth.json",
+    "~/.config/@smartthings/cli/credentials.json",
+)
 
 
 def _load_json_token(path: str) -> str | None:
-    import json
     from pathlib import Path
     p = Path(path).expanduser()
     if not p.exists():
         return None
     try:
         data = json.loads(p.read_text())
-        return data.get("oauth", {}).get("access_token") or data.get("default", {}).get("accessToken")
     except Exception:
         return None
+    return data.get("oauth", {}).get("access_token") or data.get("default", {}).get("accessToken")
 
 
 def _has_auth() -> bool:
-    import os
     if os.getenv("SMARTTHINGS_TOKEN"):
         return True
-    if _load_json_token("~/.hermes/smartthings_auth.json"):
-        return True
-    if _load_json_token("~/.config/@smartthings/cli/credentials.json"):
-        return True
-    return False
+    return any(_load_json_token(p) for p in AUTH_PATHS)
 
 
 # ── Client helper ──────────────────────────────────────────────────
@@ -76,10 +72,7 @@ def _require_location(fn):
         if not resolved:
             return {
                 "error": True,
-                "message": (
-                    "No location specified and no default location configured.\n"
-                    "Run: smartthings_set_default_location(location_id='...')"
-                ),
+                "message": "No default location configured. Run smartthings_set_default_location(location_id='...').",
             }
         return fn(c, resolved, *args, **kwargs)
     return wrapper
@@ -98,13 +91,9 @@ def smartthings_set_default_location(c, location_id: str):
 def smartthings_get_default_location(c):
     """Get the currently configured default location."""
     loc_id = loc_config.get_default_location()
-    locations = loc_config.get_locations()
-    name = locations.get(loc_id, {}).get("name", "") if loc_id else ""
     if not loc_id:
-        return {
-            "error": True,
-            "message": "No default location configured. Run smartthings_set_default_location().",
-        }
+        return {"error": True, "message": "No default location configured. Run smartthings_set_default_location()."}
+    name = loc_config.get_locations().get(loc_id, {}).get("name", "")
     return {"default_location_id": loc_id, "name": name}
 
 

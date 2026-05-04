@@ -59,16 +59,15 @@ def add_location(location_id: str, name: str = ""):
 def remove_location(location_id: str):
     """Remove a known location from config."""
     cfg = _load()
-    if "locations" in cfg and location_id in cfg["locations"]:
-        del cfg["locations"][location_id]
-        if cfg.get("default_location_id") == location_id:
-            cfg.pop("default_location_id", None)
-        _save(cfg)
-        logger.info("Removed location %s", location_id)
+    if location_id not in cfg.get("locations", {}):
+        return
+    del cfg["locations"][location_id]
+    if cfg.get("default_location_id") == location_id:
+        cfg.pop("default_location_id", None)
+    _save(cfg)
+    logger.info("Removed location %s", location_id)
 
 
 def resolve_location_id(location_id: str | None) -> str | None:
     """Return explicit location_id if given, else the configured default."""
-    if location_id:
-        return location_id
-    return get_default_location()
+    return location_id or get_default_location()
