@@ -158,6 +158,34 @@ This only needs to happen once — after `set_default_location`, all subsequent 
 
 Pass `capability` explicitly if a command fails or isn't in the known map.
 
+## Samsung TV Pitfalls
+
+### Don't trust the `label` / `name` field for device identification
+
+Samsung TVs often have **stale or incorrect `label`/`name` values** in SmartThings (e.g., `"Samsung The Frame 65"` when the actual hardware is an OLED TV). The `label` field is user-editable and may retain old names from previous setups, Art Mode configurations, or factory defaults.
+
+**Use the OCF `mnmo` (model number) field instead:**
+```python
+ocf = status["components"]["main"]["ocf"]
+model = ocf["mnmo"]["value"]   # e.g., "QE65LS03BGUXSQ"
+```
+
+### HTTP 409 "invalid device state" on `switch:off`
+
+Some Samsung TVs reject the standard `switch:off` command with HTTP 409. **Do not assume this is a Frame TV Art Mode issue** — it can happen on any Samsung TV where the firmware/OCF state machine is in a transitional or locked state.
+
+**When 409 occurs:**
+1. Re-read device status to confirm `switch` still reports `"on"`
+2. Try `samsungvd.remoteControl:send` with key `"EXIT"` or `"HOME"` first (kick the TV out of any modal state)
+3. Retry `switch:off`
+4. If still 409, the TV's OCF firmware is likely rejecting the command; fall back to asking the user to use the physical remote or Samsung mobile app
+
+**`samsungvd.remoteControl` valid keys:** UP, DOWN, LEFT, RIGHT, OK, BACK, EXIT, MENU, HOME, MUTE, PLAY, PAUSE, STOP, REWIND, FF, PLAY_BACK, SOURCE. **No POWER key.**
+
+### "App" field hallucinations
+
+The `tvChannelName` attribute (e.g., `"org.tizen.netflix-app"`) is **often stale cached data** from the last active app, not the current app. The null `playbackStatus`, empty `tvChannel`, and explicit `"Idle"` `thingStatus` are the reliable signals. Do not report an app as active when these contradict it.
+
 ## Safety
 
 - Commands execute immediately (no approval interlocks by default)
@@ -178,3 +206,4 @@ Pass `capability` explicitly if a command fails or isn't in the known map.
 - [SmartThings Capabilities](https://developer.smartthings.com/docs/devices/capabilities/capabilities-reference)
 - [SmartThings OAuth Guide](https://developer.smartthings.com/docs/connected-services/oauth-integrations)
 - `references/location-scoping.md` — design notes on the `@_require_location` pattern and config file format
+- `references/samsung-tv-http-409.md` — debugging Samsung TV power-off failures (HTTP 409 invalid device state)

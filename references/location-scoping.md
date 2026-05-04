@@ -31,10 +31,7 @@ def _require_location(fn):
         if not resolved:
             return {
                 "error": True,
-                "message": (
-                    "No location specified and no default location configured.\n"
-                    "Run: smartthings_set_default_location(location_id='...')"
-                ),
+                "message": "No default location configured. Run smartthings_set_default_location(location_id='...').",
             }
         return fn(c, resolved, *args, **kwargs)
     return wrapper
