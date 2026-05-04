@@ -23,7 +23,7 @@ _COMMAND_CAP_MAP: dict[str, str] = {
     "setThermostatFanMode": "thermostatFanMode",
     "setColor": "colorControl",
     "setColorTemperature": "colorTemperature",
-    "open": "doorControl",
+    "open": "windowShade",
     "close": "windowShade",
     "mute": "audioMute",
     "unmute": "audioMute",

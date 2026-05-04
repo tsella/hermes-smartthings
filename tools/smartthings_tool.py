@@ -1,20 +1,30 @@
 """
-Hermes tool registration for Samsung SmartThings.
+Unified SmartThings tool for Hermes Agent.
 
-Requires package installation:
-  pip install -e ~/projects/hermes-smartthings
+One interface: smartthings(action, target, value)
+  list  → list devices / scenes / modes / rooms / locations
+  get   → get device status (by name or ID)
+  set   → send command to device (by name or ID)
+  scene → execute scene (by name or ID)
+  mode  → set location mode (by name or ID)
+
+Name resolution is fuzzy — "Shade #1", "Frame 43", "OLED" all resolve automatically.
 """
 import json
 import logging
 import os
-from functools import wraps
-
-logger = logging.getLogger(__name__)
+from functools import lru_cache
 
 from tools.registry import registry  # type: ignore[import-unresolved]
 
-from hermes_smartthings.smartthings_core import get_client, SmartThingsClient
+logger = logging.getLogger(__name__)
+
+from hermes_smartthings.smartthings_core import get_client
 from hermes_smartthings import config as loc_config
+
+# ═══════════════════════════════════════════════════════════════════
+# Auth detection
+# ═══════════════════════════════════════════════════════════════════
 
 AUTH_PATHS = (
     "~/.hermes/smartthings_auth.json",
@@ -39,10 +49,12 @@ def _has_auth() -> bool:
     return any(_load_json_token(p) for p in AUTH_PATHS)
 
 
-# ── Client helper ──────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════
+# Client helpers
+# ═══════════════════════════════════════════════════════════════════
 
 
-def _client() -> SmartThingsClient | None:
+def _client():
     try:
         return get_client()
     except RuntimeError as e:
@@ -50,175 +62,364 @@ def _client() -> SmartThingsClient | None:
         return None
 
 
-def _tool(fn):
-    """Decorator: resolve client, handle auth errors, log entry/exit."""
-    @wraps(fn)
-    def wrapper(*args, task_id: str | None = None, **kwargs):
-        name = fn.__name__
-        logger.info("[tool] %s", name)
-        c = _client()
-        if not c:
-            return json.dumps({"error": True, "message": f"{name}: SmartThings client unavailable."}, indent=2)
-        return json.dumps(fn(c, *args, **kwargs), indent=2)
-    return wrapper
+# ═══════════════════════════════════════════════════════════════════
+# Fuzzy device / scene / mode / room name resolution
+# ═══════════════════════════════════════════════════════════════════
+
+@lru_cache(maxsize=8)
+def _device_cache(location_id: str | None):
+    """Return {lowercase_label: device_dict, ...} for fuzzy lookup."""
+    c = _client()
+    if not c:
+        return {}
+    loc = loc_config.resolve_location_id(location_id)
+    data = c.list_devices(location_id=loc)
+    items = data.get("items", []) if isinstance(data, dict) else []
+    cache = {}
+    for d in items:
+        label = d.get("label", d.get("name", ""))
+        cache[label.lower()] = d
+        # Also index by short chunks: "Shade #1" → "shade", "#1"
+        for part in label.lower().split():
+            if part not in cache:
+                cache[part] = d
+    return cache
 
 
-def _require_location(fn):
-    """Decorator: resolve location_id from config if omitted."""
-    @wraps(fn)
-    def wrapper(c, location_id: str | None = None, *args, **kwargs):
-        resolved = loc_config.resolve_location_id(location_id)
-        if not resolved:
-            return {
-                "error": True,
-                "message": "No default location configured. Run smartthings_set_default_location(location_id='...').",
-            }
-        return fn(c, resolved, *args, **kwargs)
-    return wrapper
+def _resolve_device(name: str, location_id: str | None = None) -> dict | None:
+    """Fuzzy-match a device name/label and return its dict."""
+    cache = _device_cache(location_id)
+    if not cache:
+        return None
+    key = name.strip().lower()
+    # Exact match
+    if key in cache:
+        return cache[key]
+    # Contains match
+    for k, v in cache.items():
+        if key in k or k in key:
+            return v
+    return None
 
 
-# ── Location config tools ──────────────────────────────────────────
-
-@_tool
-def smartthings_set_default_location(c, location_id: str):
-    """Set the default location for all device/scene operations."""
-    loc_config.set_default_location(location_id)
-    return {"success": True, "default_location_id": location_id}
-
-
-@_tool
-def smartthings_get_default_location(c):
-    """Get the currently configured default location."""
-    loc_id = loc_config.get_default_location()
-    if not loc_id:
-        return {"error": True, "message": "No default location configured. Run smartthings_set_default_location()."}
-    name = loc_config.get_locations().get(loc_id, {}).get("name", "")
-    return {"default_location_id": loc_id, "name": name}
+def _resolve_scene(name: str, location_id: str | None = None) -> str | None:
+    """Return scene ID by fuzzy name match."""
+    c = _client()
+    if not c:
+        return None
+    loc = loc_config.resolve_location_id(location_id)
+    data = c.list_scenes(location_id=loc)
+    items = data.get("items", []) if isinstance(data, dict) else []
+    key = name.strip().lower()
+    for s in items:
+        sname = s.get("sceneName", s.get("sceneName", "")).lower()
+        sid = s.get("sceneId", s.get("sceneId", ""))
+        if key == sname or key in sname or sname in key:
+            return sid
+    return None
 
 
-@_tool
-def smartthings_list_locations(c):
-    return c.list_locations()
+def _resolve_mode(name: str, location_id: str | None = None) -> str | None:
+    """Return mode ID by fuzzy name match."""
+    c = _client()
+    if not c:
+        return None
+    loc = loc_config.resolve_location_id(location_id)
+    data = c.list_modes(loc)
+    items = data.get("items", []) if isinstance(data, dict) else []
+    key = name.strip().lower()
+    for m in items:
+        mname = m.get("name", "").lower()
+        mid = m.get("id", m.get("modeId", ""))
+        if key == mname or key in mname or mname in key:
+            return mid
+    return None
 
 
-# ── Device tools (location-scoped) ─────────────────────────────────
-
-@_tool
-@_require_location
-def smartthings_list_devices(c, location_id: str):
-    return c.list_devices(location_id=location_id)
-
-
-@_tool
-def smartthings_get_device(c, device_id: str):
-    return c.get_device(device_id)
-
-
-@_tool
-def smartthings_get_device_status(c, device_id: str):
-    return c.get_device_status(device_id)
+def _resolve_location(name: str) -> str | None:
+    """Return location ID by fuzzy name match."""
+    c = _client()
+    if not c:
+        return None
+    data = c.list_locations()
+    items = data.get("items", []) if isinstance(data, dict) else []
+    key = name.strip().lower()
+    for loc in items:
+        lname = loc.get("name", "").lower()
+        lid = loc.get("locationId", "")
+        if key == lname or key in lname or lname in key:
+            return lid
+    return None
 
 
-@_tool
-def smartthings_send_command(c, device_id: str, command: str, capability: str | None = None,
-                             component: str = "main", arguments: list | None = None):
-    return c.send_command(device_id, command, capability=capability,
-                          component=component, arguments=arguments or [])
+# ═══════════════════════════════════════════════════════════════════
+# Action handlers
+# ═══════════════════════════════════════════════════════════════════
 
 
-# ── Room tools ─────────────────────────────────────────────────────
+def _action_list(what: str = "devices", location_id: str | None = None) -> dict:
+    """List devices, scenes, modes, rooms, or locations."""
+    c = _client()
+    if not c:
+        return {"error": "client unavailable"}
+    loc = loc_config.resolve_location_id(location_id)
 
-@_tool
-@_require_location
-def smartthings_list_rooms(c, location_id: str):
-    return c.list_rooms(location_id)
+    if what in ("device", "devices"):
+        if not loc:
+            return {"error": "No default location. Run set location <name> first."}
+        data = c.list_devices(location_id=loc)
+        items = data.get("items", []) if isinstance(data, dict) else []
+        return {
+            "items": [
+                {
+                    "label": d.get("label", d.get("name", "UNKNOWN")),
+                    "id": d.get("deviceId", "UNKNOWN"),
+                    "type": d.get("type", "UNKNOWN"),
+                    "on": _is_on(d) if "switch" in str(d.get("components", [])) else None,
+                }
+                for d in items
+            ]
+        }
 
+    if what in ("scene", "scenes"):
+        if not loc:
+            return {"error": "No default location. Run set location <name> first."}
+        data = c.list_scenes(location_id=loc)
+        items = data.get("items", []) if isinstance(data, dict) else []
+        return {"items": [{"name": s.get("sceneName", ""), "id": s.get("sceneId", "")} for s in items]}
 
-# ── Mode tools ─────────────────────────────────────────────────────
+    if what in ("mode", "modes"):
+        if not loc:
+            return {"error": "No default location. Run set location <name> first."}
+        data = c.list_modes(loc)
+        items = data.get("items", []) if isinstance(data, dict) else []
+        return {"items": [{"name": m.get("name", ""), "id": m.get("id", m.get("modeId", ""))} for m in items]}
 
-@_tool
-@_require_location
-def smartthings_list_modes(c, location_id: str):
-    return c.list_modes(location_id)
+    if what in ("room", "rooms"):
+        if not loc:
+            return {"error": "No default location. Run set location <name> first."}
+        data = c.list_rooms(loc)
+        items = data.get("items", []) if isinstance(data, dict) else []
+        return {"items": [{"name": r.get("name", ""), "id": r.get("roomId", "")} for r in items]}
 
+    if what in ("location", "locations"):
+        data = c.list_locations()
+        items = data.get("items", []) if isinstance(data, dict) else []
+        return {"items": [{"name": l.get("name", ""), "id": l.get("locationId", ""), "country": l.get("countryCode", "")} for l in items]}
 
-@_tool
-@_require_location
-def smartthings_get_current_mode(c, location_id: str):
-    return c.get_current_mode(location_id)
-
-
-@_tool
-@_require_location
-def smartthings_set_mode(c, location_id: str, mode_id: str):
-    return c.set_mode(location_id, mode_id)
-
-
-# ── Scene tools ────────────────────────────────────────────────────
-
-@_tool
-@_require_location
-def smartthings_list_scenes(c, location_id: str):
-    return c.list_scenes(location_id=location_id)
-
-
-@_tool
-def smartthings_execute_scene(c, scene_id: str):
-    return c.execute_scene(scene_id)
-
-
-# ── Hermes registry boilerplate ────────────────────────────────────
-
-_TOOL_SPECS = [
-    ("smartthings_set_default_location", "Set the default location for all device/scene operations.",
-     {"location_id": {"type": "string", "description": "Location UUID"}}, ["location_id"]),
-    ("smartthings_get_default_location", "Get the currently configured default location.", {}, []),
-    ("smartthings_list_locations", "List all SmartThings locations.", {}, []),
-    ("smartthings_list_devices", "List devices in the default (or specified) location. Never mixes locations.",
-     {"location_id": {"type": "string", "description": "Location UUID (optional — falls back to default)"}}, []),
-    ("smartthings_get_device", "Get full device status, capabilities, and components.",
-     {"device_id": {"type": "string", "description": "Device UUID"}}, ["device_id"]),
-    ("smartthings_get_device_status", "Get real-time attribute values (temperature, switch, lock, etc.).",
-     {"device_id": {"type": "string", "description": "Device UUID"}}, ["device_id"]),
-    ("smartthings_send_command", "Send a command. Common: on, off, setLevel, lock, setColor. Capability auto-inferred.",
-     {
-         "device_id": {"type": "string", "description": "Device UUID"},
-         "command": {"type": "string", "description": "Command name (e.g. on, off, setLevel)"},
-         "capability": {"type": "string", "description": "Optional capability ID (e.g. switch, switchLevel)"},
-         "component": {"type": "string", "description": "Component, usually main", "default": "main"},
-         "arguments": {"type": "array", "description": "Positional args list (e.g. [50])"},
-     }, ["device_id", "command"]),
-    ("smartthings_list_rooms", "List rooms in the default (or specified) location.",
-     {"location_id": {"type": "string", "description": "Location UUID (optional)"}}, []),
-    ("smartthings_list_modes", "List modes (Home, Away, Night, etc.) for the default location.",
-     {"location_id": {"type": "string", "description": "Location UUID (optional)"}}, []),
-    ("smartthings_get_current_mode", "Get the currently active mode for the default location.",
-     {"location_id": {"type": "string", "description": "Location UUID (optional)"}}, []),
-    ("smartthings_set_mode", "Change the current mode for the default location.",
-     {
-         "location_id": {"type": "string", "description": "Location UUID (optional)"},
-         "mode_id": {"type": "string", "description": "Mode UUID"},
-     }, ["mode_id"]),
-    ("smartthings_list_scenes", "List scenes for the default (or specified) location.",
-     {"location_id": {"type": "string", "description": "Location UUID (optional)"}}, []),
-    ("smartthings_execute_scene", "Run a scene by its ID.",
-     {"scene_id": {"type": "string", "description": "Scene UUID"}}, ["scene_id"]),
-]
+    return {"error": f"Unknown list target: {what}. Try: devices, scenes, modes, rooms, locations."}
 
 
-for _name, _desc, _params, _required in _TOOL_SPECS:
-    _schema = {
-        "name": _name,
-        "description": _desc,
-        "parameters": {"type": "object", "properties": _params, "required": _required},
+def _is_on(device_dict: dict) -> bool | None:
+    """Best-effort guess if a device is on, from cached profile."""
+    # We'd need status for real truth; return None for now
+    return None
+
+
+def _action_get(target: str, location_id: str | None = None) -> dict:
+    """Get device status by name or ID."""
+    c = _client()
+    if not c:
+        return {"error": "client unavailable"}
+
+    # Try UUID first, then fuzzy name
+    if len(target) == 36 and target.count("-") >= 3:
+        device_id = target
+    else:
+        d = _resolve_device(target, location_id)
+        if not d:
+            return {"error": f"Device '{target}' not found."}
+        device_id = d["deviceId"]
+
+    status = c.get_device_status(device_id)
+    profile = c.get_device(device_id)
+
+    # Flatten the most useful attributes
+    main = status.get("components", {}).get("main", {}) if isinstance(status, dict) else {}
+    label = profile.get("label", profile.get("name", target)) if isinstance(profile, dict) else target
+
+    attrs = {}
+    for cap, capdata in main.items():
+        if isinstance(capdata, dict):
+            for attrname, attrval in capdata.items():
+                if isinstance(attrval, dict) and "value" in attrval:
+                    attrs[f"{cap}.{attrname}"] = attrval["value"]
+
+    return {
+        "device": label,
+        "id": device_id,
+        "status": attrs,
     }
-    registry.register(
-        name=_name,
-        toolset="smartthings",
-        schema=_schema,
-        handler=lambda args, _n=_name, **kw: globals()[_n](**args, task_id=kw.get("task_id")),
-        check_fn=_has_auth,
-    )
-    logger.debug("Registered tool: %s", _name)
 
-logger.info("SmartThings toolset loaded (%d tools)", len(_TOOL_SPECS))
+
+def _action_set(target: str, value: str, location_id: str | None = None) -> dict:
+    """Send command to device by name or ID."""
+    c = _client()
+    if not c:
+        return {"error": "client unavailable"}
+
+    # Try UUID first, then fuzzy name
+    if len(target) == 36 and target.count("-") >= 3:
+        device_id = target
+    else:
+        d = _resolve_device(target, location_id)
+        if not d:
+            return {"error": f"Device '{target}' not found."}
+        device_id = d["deviceId"]
+
+    result = c.send_command(device_id, value)
+    return {
+        "device": target,
+        "command": value,
+        "result": result,
+    }
+
+
+def _action_scene(target: str, location_id: str | None = None) -> dict:
+    """Execute scene by name or ID."""
+    c = _client()
+    if not c:
+        return {"error": "client unavailable"}
+
+    if len(target) == 36 and target.count("-") >= 3:
+        scene_id = target
+    else:
+        scene_id = _resolve_scene(target, location_id)
+        if not scene_id:
+            return {"error": f"Scene '{target}' not found."}
+
+    result = c.execute_scene(scene_id)
+    return {"scene": target, "result": result}
+
+
+def _action_mode(target: str, location_id: str | None = None) -> dict:
+    """Set location mode by name or ID."""
+    c = _client()
+    if not c:
+        return {"error": "client unavailable"}
+
+    loc = loc_config.resolve_location_id(location_id)
+    if not loc:
+        return {"error": "No default location. Run set location <name> first."}
+
+    if len(target) == 36 and target.count("-") >= 3:
+        mode_id = target
+    else:
+        mode_id = _resolve_mode(target, location_id)
+        if not mode_id:
+            return {"error": f"Mode '{target}' not found."}
+
+    result = c.set_mode(loc, mode_id)
+    return {"mode": target, "result": result}
+
+
+def _action_location(name: str) -> dict:
+    """Set default location by name."""
+    loc_id = _resolve_location(name)
+    if not loc_id:
+        return {"error": f"Location '{name}' not found."}
+    loc_config.set_default_location(loc_id)
+    _device_cache.cache_clear()  # invalidate cache
+    return {"default_location": name, "id": loc_id}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Main unified entry point
+# ═══════════════════════════════════════════════════════════════════
+
+
+def smartthings(action: str, target: str = "", value: str = "", location_id: str = "") -> str:
+    """
+    Unified SmartThings control.
+
+    Actions:
+      list  → target=device|scene|mode|room|location
+      get   → target=<device name or ID>
+      set   → target=<device name or ID>, value=<command>
+      scene → target=<scene name or ID>
+      mode  → target=<mode name or ID>
+      location → target=<location name>
+    """
+    action = action.strip().lower()
+    target = target.strip()
+    value = value.strip()
+    loc = location_id.strip() or None
+
+    if action == "list":
+        result = _action_list(what=target or "devices", location_id=loc)
+    elif action == "get":
+        result = _action_get(target=target, location_id=loc)
+    elif action == "set":
+        result = _action_set(target=target, value=value, location_id=loc)
+    elif action == "scene":
+        result = _action_scene(target=target, location_id=loc)
+    elif action == "mode":
+        result = _action_mode(target=target, location_id=loc)
+    elif action == "location":
+        result = _action_location(name=target)
+    else:
+        result = {"error": f"Unknown action '{action}'. Try: list, get, set, scene, mode, location."}
+
+    return json.dumps(result, indent=2, default=str)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Hermes registration — ONE tool replaces 13
+# ═══════════════════════════════════════════════════════════════════
+
+_SCHEMA = {
+    "name": "smartthings",
+    "description": (
+        "Unified SmartThings control. Single interface for list/get/set/scene/mode.\n"
+        "Examples:\n"
+        "  smartthings('list', 'devices')\n"
+        "  smartthings('get', 'Shade #1')\n"
+        "  smartthings('set', 'Shade #1', 'close')\n"
+        "  smartthings('scene', 'Movie Night')\n"
+        "  smartthings('mode', 'Away')\n"
+        "  smartthings('location', '35E38St')"
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["list", "get", "set", "scene", "mode", "location"],
+                "description": "What to do: list, get, set, scene, mode, or location",
+            },
+            "target": {
+                "type": "string",
+                "description": "Device name/ID, scene name, mode name, or list target (devices/scenes/modes/rooms/locations).",
+            },
+            "value": {
+                "type": "string",
+                "description": "Command value for 'set' action (e.g., on, off, close, setLevel).",
+            },
+            "location_id": {
+                "type": "string",
+                "description": "Optional location UUID override.",
+            },
+        },
+        "required": ["action"],
+    },
+}
+
+
+def _handler(args: dict, **kwargs) -> str:
+    return smartthings(
+        action=args.get("action", ""),
+        target=args.get("target", ""),
+        value=args.get("value", ""),
+        location_id=args.get("location_id", ""),
+    )
+
+
+registry.register(
+    name="smartthings",
+    toolset="smartthings",
+    schema=_SCHEMA,
+    handler=_handler,
+    check_fn=_has_auth,
+)
+
+logger.info("SmartThings unified tool registered")
