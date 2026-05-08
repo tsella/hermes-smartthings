@@ -160,4 +160,7 @@ Often stale cached data. Trust `thingStatus: Idle` + null `playbackStatus` over 
 
 ## References
 
-- `references/samsung-tv-http-409.md` — Samsung TV power-off debugging
+| File | Topic |
+|---|---|
+| `references/samsung-tv-http-409.md` | Samsung TV power-off debugging |
+| `references/lookup-index-duplication.md` | Device-list deduplication fix (multi-key lookup index pitfall) |

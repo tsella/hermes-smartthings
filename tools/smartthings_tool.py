@@ -84,6 +84,7 @@ class _DeviceIndex:
 
     def __init__(self, location_id: str | None = None):
         self.location_id = location_id
+        self.devices: list[dict] = []          # deduplicated, canonical device list
         self.by_label: dict[str, dict] = {}
         self.by_capability: dict[str, list[dict]] = {}
         self.by_category: dict[str, list[dict]] = {}
@@ -97,11 +98,21 @@ class _DeviceIndex:
         data = c.list_devices(location_id=self._location)
         items = data.get("items", []) if isinstance(data, dict) else []
 
+        self.devices.clear()
         self.by_label.clear()
         self.by_capability.clear()
         self.by_category.clear()
 
+        # Deduplicate while preserving order
+        seen_ids = set()
         for d in items:
+            dev_id = d.get("deviceId")
+            if dev_id and dev_id in seen_ids:
+                continue
+            if dev_id:
+                seen_ids.add(dev_id)
+            self.devices.append(d)
+
             label = d.get("label", d.get("name", ""))
             self.by_label[label.lower()] = d
             self.by_label[label.lower().replace(" ", "")] = d
@@ -114,10 +125,10 @@ class _DeviceIndex:
                     cap_id = cap.get("id", "")
                     self.by_capability.setdefault(cap_id, []).append(d)
 
-            # Index by category
-            for cat in comp.get("categories", []):
-                cat_name = cat.get("name", "").lower()
-                self.by_category.setdefault(cat_name, []).append(d)
+                # Index by category
+                for cat in comp.get("categories", []):
+                    cat_name = cat.get("name", "").lower()
+                    self.by_category.setdefault(cat_name, []).append(d)
 
     def devices_with_capability(self, capability: str) -> list[dict]:
         return list(self.by_capability.get(capability, []))
@@ -391,7 +402,7 @@ def _action_list(what: str = "devices", location_id: str | None = None) -> dict:
                     "id": d.get("deviceId", "UNKNOWN"),
                     "type": d.get("type", "UNKNOWN"),
                 }
-                for d in sorted(idx.by_label.values(), key=lambda x: x.get("label", ""))
+                for d in sorted(idx.devices, key=lambda x: x.get("label", ""))
             ]
         }
 
